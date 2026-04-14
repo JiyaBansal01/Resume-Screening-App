@@ -1,125 +1,815 @@
-# you need to install all these in your terminal
-# pip install streamlit
-# pip install scikit-learn
-# pip install python-docx
-# pip install PyPDF2
-
-
 import streamlit as st
 import pickle
-import docx  # Extract text from Word file
-import PyPDF2  # Extract text from PDF
+import docx
+import PyPDF2
 import re
+import numpy as np
+import pandas as pd
+import io
+import json
+import urllib.request
+from datetime import datetime
 
-# Load pre-trained model and TF-IDF vectorizer (ensure these are saved earlier)
-svc_model = pickle.load(open('clf.pkl', 'rb'))  # Example file name, adjust as needed
-tfidf = pickle.load(open('tfidf.pkl', 'rb'))  # Example file name, adjust as needed
-le = pickle.load(open('encoder.pkl', 'rb'))  # Example file name, adjust as needed
+# ─── Page config ────────────────────────────────────────────────────────────
+st.set_page_config(
+    page_title="ResumeIQ — AI Resume Screener",
+    page_icon="📄",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+
+# ─── Custom CSS ─────────────────────────────────────────────────────────────
+st.markdown("""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap');
+
+html, body, [class*="css"] { font-family: 'DM Sans', sans-serif; }
+
+.stApp { background: #0f1117; }
+
+/* Sidebar */
+[data-testid="stSidebar"] {
+    background: #161b27 !important;
+    border-right: 1px solid #2a2f3e;
+}
+[data-testid="stSidebar"] * { color: #c8d0e0 !important; }
+
+/* Main area */
+.main .block-container { padding: 2rem 2.5rem; }
+
+/* Cards */
+.iq-card {
+    background: #161b27;
+    border: 1px solid #2a2f3e;
+    border-radius: 14px;
+    padding: 1.5rem;
+    margin-bottom: 1.2rem;
+}
+.iq-card-accent {
+    background: linear-gradient(135deg, #1a2035 0%, #161b27 100%);
+    border: 1px solid #3b4a6b;
+    border-radius: 14px;
+    padding: 1.5rem;
+    margin-bottom: 1.2rem;
+}
+
+/* Category badge */
+.cat-badge {
+    display: inline-block;
+    background: #1e3a5f;
+    color: #60a5fa !important;
+    border: 1px solid #2563eb55;
+    border-radius: 8px;
+    padding: 0.35rem 0.9rem;
+    font-size: 0.8rem;
+    font-weight: 500;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    margin: 0.2rem 0.2rem 0.2rem 0;
+}
+.cat-badge-top {
+    background: #1a3a1a;
+    color: #4ade80 !important;
+    border-color: #16a34a55;
+}
+
+/* Confidence bar */
+.conf-bar-wrap { margin: 0.5rem 0; }
+.conf-bar-label {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.82rem;
+    color: #94a3b8;
+    margin-bottom: 4px;
+}
+.conf-bar-bg {
+    background: #1e2433;
+    border-radius: 6px;
+    height: 8px;
+    overflow: hidden;
+}
+.conf-bar-fill {
+    height: 100%;
+    border-radius: 6px;
+    background: linear-gradient(90deg, #2563eb, #60a5fa);
+    transition: width 0.6s ease;
+}
+
+/* Score ring */
+.score-ring {
+    text-align: center;
+    padding: 1rem;
+}
+.score-number {
+    font-size: 3rem;
+    font-weight: 600;
+    font-family: 'DM Mono', monospace;
+}
+
+/* Keyword chips */
+.kw-chip {
+    display: inline-block;
+    background: #1a2035;
+    border: 1px solid #2a3a5a;
+    border-radius: 20px;
+    padding: 0.25rem 0.7rem;
+    font-size: 0.78rem;
+    color: #94a3b8;
+    margin: 0.15rem;
+}
+.kw-chip-missing {
+    background: #2a1515;
+    border-color: #7f1d1d55;
+    color: #f87171;
+}
+.kw-chip-match {
+    background: #0f2a1a;
+    border-color: #14532d55;
+    color: #4ade80;
+}
+
+/* Headers */
+h1 { color: #f1f5f9 !important; font-weight: 600 !important; }
+h2, h3 { color: #e2e8f0 !important; font-weight: 500 !important; }
+
+/* Metrics */
+[data-testid="stMetric"] {
+    background: #161b27;
+    border: 1px solid #2a2f3e;
+    border-radius: 10px;
+    padding: 1rem;
+}
+[data-testid="stMetricValue"] { color: #60a5fa !important; }
+[data-testid="stMetricLabel"] { color: #94a3b8 !important; }
+
+/* Tabs */
+[data-baseweb="tab-list"] { background: #161b27; border-radius: 10px; }
+[data-baseweb="tab"] { color: #94a3b8 !important; }
+[aria-selected="true"] { color: #60a5fa !important; }
+
+/* Buttons */
+.stButton button {
+    background: #2563eb;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    font-weight: 500;
+}
+.stButton button:hover { background: #1d4ed8; }
+
+/* File uploader */
+[data-testid="stFileUploader"] {
+    background: #161b27;
+    border: 2px dashed #2a3a5a;
+    border-radius: 12px;
+}
+
+/* Text area */
+textarea { background: #1e2433 !important; color: #e2e8f0 !important; border-color: #2a2f3e !important; }
+
+/* Divider */
+hr { border-color: #2a2f3e; }
+</style>
+""", unsafe_allow_html=True)
 
 
-# Function to clean resume text
-def cleanResume(txt):
-    cleanText = re.sub('http\S+\s', ' ', txt)
-    cleanText = re.sub('RT|cc', ' ', cleanText)
-    cleanText = re.sub('#\S+\s', ' ', cleanText)
-    cleanText = re.sub('@\S+', '  ', cleanText)
-    cleanText = re.sub('[%s]' % re.escape("""!"#$%&'()*+,-./:;<=>?@[\]^_`{|}~"""), ' ', cleanText)
-    cleanText = re.sub(r'[^\x00-\x7f]', ' ', cleanText)
-    cleanText = re.sub('\s+', ' ', cleanText)
-    return cleanText
+# ─── Load models ─────────────────────────────────────────────────────────────
+@st.cache_resource
+def load_models():
+    clf    = pickle.load(open('clf.pkl', 'rb'))
+    tfidf  = pickle.load(open('tfidf.pkl', 'rb'))
+    le     = pickle.load(open('encoder.pkl', 'rb'))
+    return clf, tfidf, le
+
+clf, tfidf, le = load_models()
+
+# ─── Category keyword map ─────────────────────────────────────────────────────
+CATEGORY_KEYWORDS = {
+    "Data Science":             ["python","machine learning","deep learning","tensorflow","pandas","numpy","sql","statistics","sklearn","nlp","data analysis","jupyter","matplotlib","seaborn","pytorch"],
+    "Java Developer":           ["java","spring","maven","hibernate","microservices","junit","rest api","sql","oop","git","docker","kafka","jenkins"],
+    "Python Developer":         ["python","django","flask","fastapi","rest","sql","nosql","git","docker","aws","pandas","numpy","linux","celery"],
+    "Web Designing":            ["html","css","javascript","react","figma","photoshop","ux","ui","sass","tailwind","responsive","adobe xd","bootstrap","wordpress"],
+    "DevOps Engineer":          ["docker","kubernetes","aws","ci/cd","jenkins","terraform","linux","ansible","git","monitoring","bash","azure","gcp","helm"],
+    "HR":                       ["recruitment","talent acquisition","onboarding","payroll","hris","employee relations","performance management","training","compliance","excel"],
+    "Testing":                  ["selenium","manual testing","automation","jira","test cases","qa","regression","performance testing","postman","api testing"],
+    "Business Analyst":         ["requirements","stakeholders","sql","excel","visio","tableau","powerbi","brd","agile","scrum","process mapping","jira"],
+    "Network Security Engineer":["firewall","vpn","siem","ids","ips","cisco","penetration testing","vulnerability","linux","wireshark","compliance","nist"],
+    "Blockchain":               ["solidity","ethereum","smart contracts","web3","defi","nft","hyperledger","cryptography","truffle","metamask"],
+    "Sales":                    ["crm","salesforce","b2b","b2c","lead generation","negotiation","pipeline","excel","communication","revenue","cold calling"],
+    "Database":                 ["sql","mysql","postgresql","oracle","nosql","mongodb","database design","stored procedures","etl","performance tuning"],
+    "Hadoop":                   ["hadoop","spark","hive","hdfs","pig","mapreduce","kafka","hbase","scala","python","yarn","data pipeline"],
+    "ETL Developer":            ["etl","informatica","ssis","sql","data warehouse","python","talend","oracle","unix","data pipeline","ab initio"],
+    "Operations Manager":       ["operations","supply chain","logistics","kpi","process improvement","lean","six sigma","budget","excel","team management"],
+    "Mechanical Engineer":      ["autocad","solidworks","catia","manufacturing","thermodynamics","fea","ansys","production","cad","tolerance","machining"],
+    "Civil Engineer":           ["autocad","staad","revit","construction","structural","concrete","surveying","project management","roads","bridges","estimation"],
+    "Electrical Engineering":   ["plc","scada","electrical design","autocad","matlab","power systems","circuit","vfd","hmi","motors","wiring"],
+    "SAP Developer":            ["sap","abap","s/4hana","fiori","basis","bw","sd","mm","fi","co","debug","transport management"],
+    "Automation Testing":       ["selenium","appium","java","python","testng","cucumber","jenkins","rest assured","postman","git","jira","robot framework"],
+    "DotNet Developer":         ["c#",".net","asp.net","mvc","entity framework","sql server","azure","wpf","rest api","visual studio","linq"],
+    "Advocate":                 ["legal research","litigation","contracts","drafting","court","compliance","ipc","crpc","arbitration","intellectual property"],
+    "Arts":                     ["photography","painting","illustration","adobe","photoshop","creativity","design","portfolio","exhibitions","art direction"],
+    "Health and fitness":       ["nutrition","personal training","fitness","anatomy","physiology","wellness","rehabilitation","sports science","coaching"],
+    "PMO":                      ["project management","pmo","pmp","agile","scrum","risk","stakeholders","ms project","governance","budget","milestones"],
+}
+
+CATEGORY_COLORS = {
+    "Data Science": "#3b82f6", "Java Developer": "#f59e0b", "Python Developer": "#10b981",
+    "Web Designing": "#8b5cf6", "DevOps Engineer": "#ef4444", "HR": "#ec4899",
+    "Testing": "#06b6d4", "Business Analyst": "#84cc16", "Network Security Engineer": "#f97316",
+    "Blockchain": "#6366f1", "Sales": "#14b8a6", "Database": "#a855f7",
+    "Hadoop": "#eab308", "ETL Developer": "#64748b", "Operations Manager": "#0ea5e9",
+    "Mechanical Engineer": "#78716c", "Civil Engineer": "#92400e", "Electrical Engineering": "#fbbf24",
+    "SAP Developer": "#0d9488", "Automation Testing": "#7c3aed", "DotNet Developer": "#1d4ed8",
+    "Advocate": "#be185d", "Arts": "#d97706", "Health and fitness": "#059669", "PMO": "#475569",
+}
 
 
-# Function to extract text from PDF
-def extract_text_from_pdf(file):
-    pdf_reader = PyPDF2.PdfReader(file)
-    text = ''
-    for page in pdf_reader.pages:
-        text += page.extract_text()
-    return text
+# ─── Utility functions ───────────────────────────────────────────────────────
+def clean_resume(txt: str) -> str:
+    txt = re.sub(r'http\S+\s', ' ', txt)
+    txt = re.sub(r'RT|cc', ' ', txt)
+    txt = re.sub(r'#\S+\s', ' ', txt)
+    txt = re.sub(r'@\S+', ' ', txt)
+    txt = re.sub(r'[%s]' % re.escape(r"""!"#$%&'()*+,-./:;<=>?@[\]^_`{|}~"""), ' ', txt)
+    txt = re.sub(r'[^\x00-\x7f]', ' ', txt)
+    txt = re.sub(r'\s+', ' ', txt)
+    return txt.strip()
 
 
-# Function to extract text from DOCX
-def extract_text_from_docx(file):
-    doc = docx.Document(file)
-    text = ''
-    for paragraph in doc.paragraphs:
-        text += paragraph.text + '\n'
-    return text
+def extract_text(file) -> str:
+    ext = file.name.split('.')[-1].lower()
+    if ext == 'pdf':
+        reader = PyPDF2.PdfReader(file)
+        return ' '.join(p.extract_text() or '' for p in reader.pages)
+    elif ext == 'docx':
+        doc = docx.Document(file)
+        return '\n'.join(p.text for p in doc.paragraphs)
+    elif ext == 'txt':
+        raw = file.read()
+        try:    return raw.decode('utf-8')
+        except: return raw.decode('latin-1')
+    raise ValueError(f"Unsupported file type: .{ext}")
 
 
-# Function to extract text from TXT with explicit encoding handling
-def extract_text_from_txt(file):
-    # Try using utf-8 encoding for reading the text file
+def get_confidence_scores(text: str) -> list[tuple[str, float]]:
+    """Return sorted (category, confidence%) list using decision function."""
+    cleaned   = clean_resume(text)
+    vec       = tfidf.transform([cleaned]).toarray()
+    scores_raw = clf.decision_function(vec)[0]          # raw SVM margins
+    # Softmax-like normalization so they sum to 100
+    exp_s     = np.exp(scores_raw - scores_raw.max())
+    probs     = exp_s / exp_s.sum() * 100
+    pairs     = sorted(zip(le.classes_, probs), key=lambda x: -x[1])
+    return pairs
+
+
+def predict_category(text: str) -> str:
+    cleaned = clean_resume(text)
+    vec     = tfidf.transform([cleaned]).toarray()
+    pred    = clf.predict(vec)
+    return le.inverse_transform(pred)[0]
+
+
+def compute_resume_score(text: str, category: str) -> dict:
+    """Compute a 0-100 resume quality score and keyword analysis."""
+    lower = text.lower()
+    words = lower.split()
+    kws   = CATEGORY_KEYWORDS.get(category, [])
+
+    matched  = [k for k in kws if k in lower]
+    missing  = [k for k in kws if k not in lower]
+    kw_score = (len(matched) / len(kws) * 40) if kws else 0  # 40 pts
+
+    # Length score (ideal: 300-800 words) — 20 pts
+    wc = len(words)
+    if   wc < 100:   len_score = 5
+    elif wc < 300:   len_score = 12
+    elif wc <= 800:  len_score = 20
+    elif wc <= 1200: len_score = 15
+    else:            len_score = 8
+
+    # Sections detected — 20 pts (4 pts each)
+    sections = {
+        "Education":    any(s in lower for s in ["education","degree","university","college","bachelor","master","phd"]),
+        "Experience":   any(s in lower for s in ["experience","worked","employed","job","company","role","position"]),
+        "Skills":       any(s in lower for s in ["skills","technologies","tools","proficient","expertise"]),
+        "Projects":     any(s in lower for s in ["project","built","developed","created","implemented"]),
+        "Contact info": any(s in lower for s in ["email","phone","linkedin","github","@"]),
+    }
+    section_score = sum(sections.values()) * 4
+
+    # Action verbs — 10 pts
+    verbs = ["managed","developed","led","designed","implemented","built","created","improved","increased",
+             "reduced","analyzed","collaborated","delivered","launched","optimized"]
+    verb_hits  = sum(1 for v in verbs if v in lower)
+    verb_score = min(verb_hits * 2, 10)
+
+    # Quantified achievements — 10 pts
+    numbers = re.findall(r'\b\d+[%+]?\b', text)
+    quant_score = min(len(numbers) * 2, 10)
+
+    total = int(kw_score + len_score + section_score + verb_score + quant_score)
+
+    return {
+        "total": min(total, 100),
+        "breakdown": {
+            "Keyword match": int(kw_score),
+            "Content length": int(len_score),
+            "Sections present": int(section_score),
+            "Action verbs": int(verb_score),
+            "Quantified results": int(quant_score),
+        },
+        "matched_keywords":  matched,
+        "missing_keywords":  missing,
+        "sections_detected": sections,
+        "word_count":        wc,
+    }
+
+
+def skills_gap_analysis(resume_text: str, job_description: str, category: str) -> dict:
+    jd_lower  = job_description.lower()
+    res_lower = resume_text.lower()
+    kws       = CATEGORY_KEYWORDS.get(category, [])
+
+    # JD keywords: extract any from our known list + simple word extraction
+    jd_required = [k for k in kws if k in jd_lower]
+    # Also extract 2-3 word phrases from JD
+    jd_words = set(re.findall(r'\b[a-z]{4,}\b', jd_lower))
+    extra_jd = [w for w in jd_words if w in res_lower == False and len(w) > 4][:10]
+
+    present_in_resume = [k for k in jd_required if k in res_lower]
+    missing_from_resume = [k for k in jd_required if k not in res_lower]
+    match_pct = int(len(present_in_resume) / len(jd_required) * 100) if jd_required else 0
+
+    return {
+        "match_pct":         match_pct,
+        "jd_keywords":       jd_required,
+        "present":           present_in_resume,
+        "missing":           missing_from_resume,
+    }
+
+
+def generate_csv(results: list[dict]) -> bytes:
+    rows = []
+    for r in results:
+        rows.append({
+            "File":          r["filename"],
+            "Category":      r["category"],
+            "Confidence (%)": f"{r['top_confidence']:.1f}",
+            "Resume Score":  r["score"],
+            "Word Count":    r["word_count"],
+            "Matched Keywords": ", ".join(r["matched_kws"]),
+            "Missing Keywords": ", ".join(r["missing_kws"]),
+            "Timestamp":     r["timestamp"],
+        })
+    return pd.DataFrame(rows).to_csv(index=False).encode()
+
+
+# ─── Sidebar ─────────────────────────────────────────────────────────────────
+# ─── Gemini API helper ───────────────────────────────────────────────────────
+def call_gemini(api_key: str, prompt: str) -> str:
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
+    body = json.dumps({"contents": [{"parts": [{"text": prompt}]}]}).encode()
+    req  = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"})
     try:
-        text = file.read().decode('utf-8')
-    except UnicodeDecodeError:
-        # In case utf-8 fails, try 'latin-1' encoding as a fallback
-        text = file.read().decode('latin-1')
-    return text
+        with urllib.request.urlopen(req, timeout=30) as r:
+            data = json.loads(r.read())
+            return data["candidates"][0]["content"]["parts"][0]["text"]
+    except Exception as e:
+        return f"❌ API Error: {e}"
 
 
-# Function to handle file upload and extraction
-def handle_file_upload(uploaded_file):
-    file_extension = uploaded_file.name.split('.')[-1].lower()
-    if file_extension == 'pdf':
-        text = extract_text_from_pdf(uploaded_file)
-    elif file_extension == 'docx':
-        text = extract_text_from_docx(uploaded_file)
-    elif file_extension == 'txt':
-        text = extract_text_from_txt(uploaded_file)
+def get_improvement_suggestions(api_key: str, resume_text: str, category: str, score_data: dict) -> str:
+    missing = ", ".join(score_data["missing_keywords"][:10]) or "none"
+    prompt = f"""You are an expert resume coach. Analyze this resume for a {category} role.
+
+Resume text (first 1500 chars):
+{resume_text[:1500]}
+
+Current score: {score_data['total']}/100
+Missing keywords: {missing}
+Sections detected: {[k for k,v in score_data['sections_detected'].items() if v]}
+Missing sections: {[k for k,v in score_data['sections_detected'].items() if not v]}
+
+Give exactly 6 specific, actionable improvement suggestions numbered 1-6.
+Each suggestion should be 1-2 sentences. Be direct and practical.
+Format: just the numbered list, no intro text."""
+    return call_gemini(api_key, prompt)
+
+
+def generate_cover_letter(api_key: str, resume_text: str, category: str, company: str, role: str) -> str:
+    prompt = f"""Write a professional cover letter based on this resume for a {category} position.
+
+Company: {company if company else "the company"}
+Role: {role if role else category}
+
+Resume (first 1500 chars):
+{resume_text[:1500]}
+
+Write a compelling 3-paragraph cover letter:
+- Paragraph 1: Strong opening, mention role and key strength
+- Paragraph 2: 2-3 specific achievements/skills from the resume
+- Paragraph 3: Enthusiasm for company, call to action
+
+Keep it under 300 words. Professional tone. Do not use placeholders like [Your Name]."""
+    return call_gemini(api_key, prompt)
+
+
+# ─── Sidebar ─────────────────────────────────────────────────────────────────
+with st.sidebar:
+    st.markdown("## 📄 ResumeIQ")
+    st.markdown("*AI-Powered Resume Screener*")
+    st.divider()
+
+    mode = st.radio(
+        "Mode",
+        ["Single Resume", "Batch Screening", "Skills Gap Analysis"],
+        label_visibility="collapsed",
+    )
+    st.divider()
+
+    st.markdown("**🤖 Gemini AI Features**")
+    gemini_key = st.text_input(
+        "Gemini API Key",
+        type="password",
+        placeholder="Paste your API key here...",
+        help="Get free key at aistudio.google.com/apikey"
+    )
+    if gemini_key:
+        st.success("✅ AI features unlocked!")
     else:
-        raise ValueError("Unsupported file type. Please upload a PDF, DOCX, or TXT file.")
-    return text
+        st.caption("🔑 Add key to enable AI suggestions & cover letter")
+    st.divider()
+
+    st.markdown("**Model info**")
+    st.markdown(f"- `OneVsRest + SVC`")
+    st.markdown(f"- `TF-IDF vectorizer`")
+    st.markdown(f"- `{len(le.classes_)} job categories`")
+    st.divider()
+
+    st.markdown("**Supported formats**")
+    st.markdown("PDF · DOCX · TXT")
 
 
-# Function to predict the category of a resume
-def pred(input_resume):
-    # Preprocess the input text (e.g., cleaning, etc.)
-    cleaned_text = cleanResume(input_resume)
+# ─── SINGLE RESUME MODE ──────────────────────────────────────────────────────
+if mode == "Single Resume":
+    st.markdown("# Resume Analyzer")
+    st.markdown("Upload a resume to get category prediction, confidence scores, and quality analysis.")
+    st.markdown("")
 
-    # Vectorize the cleaned text using the same TF-IDF vectorizer used during training
-    vectorized_text = tfidf.transform([cleaned_text])
+    uploaded = st.file_uploader("Drop a resume here", type=["pdf","docx","txt"], label_visibility="collapsed")
 
-    # Convert sparse matrix to dense
-    vectorized_text = vectorized_text.toarray()
+    if uploaded:
+        with st.spinner("Analyzing resume..."):
+            try:
+                text = extract_text(uploaded)
+            except Exception as e:
+                st.error(f"Could not read file: {e}")
+                st.stop()
 
-    # Prediction
-    predicted_category = svc_model.predict(vectorized_text)
+            category    = predict_category(text)
+            conf_scores = get_confidence_scores(text)
+            top_conf    = conf_scores[0][1]
+            score_data  = compute_resume_score(text, category)
 
-    # get name of predicted category
-    predicted_category_name = le.inverse_transform(predicted_category)
+        # ── Top row ──────────────────────────────────────────────────────────
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Predicted Category", category)
+        with col2:
+            st.metric("Confidence", f"{top_conf:.1f}%")
+        with col3:
+            st.metric("Resume Score", f"{score_data['total']}/100")
+        with col4:
+            st.metric("Word Count", score_data["word_count"])
 
-    return predicted_category_name[0]  # Return the category name
+        st.markdown("")
+        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["🎯 Prediction", "📊 Quality Score", "🔑 Keywords", "💡 AI Suggestions", "✉️ Cover Letter", "📝 Raw Text"])
+
+        # ── Tab 1: Prediction ────────────────────────────────────────────────
+        with tab1:
+            c1, c2 = st.columns([1, 1])
+            with c1:
+                color = CATEGORY_COLORS.get(category, "#60a5fa")
+                st.markdown(f"""
+                <div class="iq-card-accent">
+                  <div style="font-size:0.8rem;color:#94a3b8;letter-spacing:.06em;text-transform:uppercase;margin-bottom:.5rem">Best match</div>
+                  <div style="font-size:2rem;font-weight:600;color:{color}">{category}</div>
+                  <div style="margin-top:.5rem;font-size:0.9rem;color:#64748b">{top_conf:.1f}% confidence</div>
+                </div>
+                """, unsafe_allow_html=True)
+
+                st.markdown("**Other possible categories**")
+                for cat, pct in conf_scores[1:6]:
+                    c = CATEGORY_COLORS.get(cat, "#60a5fa")
+                    st.markdown(f"""
+                    <div class="conf-bar-wrap">
+                      <div class="conf-bar-label"><span>{cat}</span><span>{pct:.1f}%</span></div>
+                      <div class="conf-bar-bg"><div class="conf-bar-fill" style="width:{min(pct,100):.1f}%;background:linear-gradient(90deg,{c}88,{c})"></div></div>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+            with c2:
+                st.markdown("**All 25 categories**")
+                html = ""
+                for cat, pct in conf_scores:
+                    c = CATEGORY_COLORS.get(cat, "#60a5fa")
+                    bold = "font-weight:600;" if cat == category else ""
+                    html += f'<span class="cat-badge" style="{bold}border-color:{c}44;color:{c};background:{c}15">{cat} <span style="opacity:.7">{pct:.0f}%</span></span>'
+                st.markdown(html, unsafe_allow_html=True)
+
+        # ── Tab 2: Quality Score ─────────────────────────────────────────────
+        with tab2:
+            total = score_data["total"]
+            color = "#4ade80" if total >= 70 else "#fbbf24" if total >= 45 else "#f87171"
+            grade = "Excellent" if total >= 80 else "Good" if total >= 65 else "Average" if total >= 45 else "Needs work"
+
+            c1, c2 = st.columns([1, 1.5])
+            with c1:
+                st.markdown(f"""
+                <div class="iq-card" style="text-align:center;padding:2rem">
+                  <div style="font-size:4rem;font-weight:700;font-family:'DM Mono',monospace;color:{color}">{total}</div>
+                  <div style="font-size:1rem;color:{color};margin-top:.2rem">{grade}</div>
+                  <div style="font-size:.8rem;color:#64748b;margin-top:.5rem">out of 100</div>
+                </div>
+                """, unsafe_allow_html=True)
+
+                st.markdown("**Sections detected**")
+                for sec, found in score_data["sections_detected"].items():
+                    icon = "✅" if found else "❌"
+                    st.markdown(f"{icon} {sec}")
+
+            with c2:
+                st.markdown("**Score breakdown**")
+                for label, pts in score_data["breakdown"].items():
+                    maxpts = {"Keyword match": 40, "Content length": 20, "Sections present": 20,
+                              "Action verbs": 10, "Quantified results": 10}[label]
+                    pct = pts / maxpts * 100
+                    c = "#4ade80" if pct >= 70 else "#fbbf24" if pct >= 40 else "#f87171"
+                    st.markdown(f"""
+                    <div class="conf-bar-wrap" style="margin-bottom:.8rem">
+                      <div class="conf-bar-label">
+                        <span>{label}</span>
+                        <span>{pts}/{maxpts} pts</span>
+                      </div>
+                      <div class="conf-bar-bg" style="height:10px">
+                        <div class="conf-bar-fill" style="width:{pct:.0f}%;background:linear-gradient(90deg,{c}88,{c})"></div>
+                      </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+        # ── Tab 3: Keywords ──────────────────────────────────────────────────
+        with tab3:
+            c1, c2 = st.columns(2)
+            with c1:
+                st.markdown(f"**✅ Found keywords** ({len(score_data['matched_keywords'])})")
+                html = " ".join(f'<span class="kw-chip kw-chip-match">{k}</span>' for k in score_data['matched_keywords'])
+                st.markdown(html or "<span style='color:#64748b'>None detected</span>", unsafe_allow_html=True)
+            with c2:
+                st.markdown(f"**❌ Missing keywords** ({len(score_data['missing_keywords'])})")
+                html = " ".join(f'<span class="kw-chip kw-chip-missing">{k}</span>' for k in score_data['missing_keywords'])
+                st.markdown(html or "<span style='color:#4ade80'>All key skills present!</span>", unsafe_allow_html=True)
+
+            if score_data['missing_keywords']:
+                st.markdown("")
+                st.info(f"💡 Add these {len(score_data['missing_keywords'])} missing keywords to improve your score by up to **{len(score_data['missing_keywords']) * 3}** points.")
+
+        # ── Tab 4: AI Suggestions ────────────────────────────────────────────
+        with tab4:
+            if not gemini_key:
+                st.markdown("""
+                <div class="iq-card" style="text-align:center;padding:2.5rem">
+                  <div style="font-size:2rem;margin-bottom:.5rem">🤖</div>
+                  <div style="color:#94a3b8;font-size:1rem">Add your Gemini API key in the sidebar to unlock AI-powered resume improvement suggestions.</div>
+                  <div style="margin-top:1rem;font-size:.85rem;color:#64748b">Free key at → aistudio.google.com/apikey</div>
+                </div>
+                """, unsafe_allow_html=True)
+            else:
+                if st.button("✨ Generate AI Improvement Suggestions", use_container_width=True):
+                    with st.spinner("AI is analyzing your resume..."):
+                        suggestions = get_improvement_suggestions(gemini_key, text, category, score_data)
+                    st.session_state["suggestions"] = suggestions
+
+                if "suggestions" in st.session_state:
+                    st.markdown("""<div class="iq-card">""", unsafe_allow_html=True)
+                    st.markdown("### 💡 Personalized Improvement Tips")
+                    st.markdown(st.session_state["suggestions"])
+                    st.markdown("</div>", unsafe_allow_html=True)
+                    st.download_button(
+                        "⬇️ Download suggestions as TXT",
+                        data=st.session_state["suggestions"],
+                        file_name="resume_suggestions.txt",
+                        mime="text/plain"
+                    )
+
+        # ── Tab 5: Cover Letter ──────────────────────────────────────────────
+        with tab5:
+            if not gemini_key:
+                st.markdown("""
+                <div class="iq-card" style="text-align:center;padding:2.5rem">
+                  <div style="font-size:2rem;margin-bottom:.5rem">✉️</div>
+                  <div style="color:#94a3b8;font-size:1rem">Add your Gemini API key in the sidebar to generate a personalized cover letter.</div>
+                  <div style="margin-top:1rem;font-size:.85rem;color:#64748b">Free key at → aistudio.google.com/apikey</div>
+                </div>
+                """, unsafe_allow_html=True)
+            else:
+                c1, c2 = st.columns(2)
+                with c1:
+                    company_name = st.text_input("Company name (optional)", placeholder="e.g. Google, TCS, Infosys")
+                with c2:
+                    role_name = st.text_input("Job role (optional)", placeholder=f"e.g. {category}")
+
+                if st.button("✨ Generate Cover Letter", use_container_width=True):
+                    with st.spinner("AI is writing your cover letter..."):
+                        cover = generate_cover_letter(gemini_key, text, category, company_name, role_name)
+                    st.session_state["cover_letter"] = cover
+
+                if "cover_letter" in st.session_state:
+                    st.markdown("""<div class="iq-card">""", unsafe_allow_html=True)
+                    st.markdown("### ✉️ Your Cover Letter")
+                    st.text_area("", st.session_state["cover_letter"], height=350, label_visibility="collapsed")
+                    st.markdown("</div>", unsafe_allow_html=True)
+                    st.download_button(
+                        "⬇️ Download cover letter as TXT",
+                        data=st.session_state["cover_letter"],
+                        file_name="cover_letter.txt",
+                        mime="text/plain"
+                    )
+
+        # ── Tab 6: Raw Text ──────────────────────────────────────────────────
+        with tab6:
+            st.text_area("Extracted text", text, height=350, label_visibility="collapsed")
 
 
-# Streamlit app layout
-def main():
-    st.set_page_config(page_title="Resume Category Prediction", page_icon="📄", layout="wide")
+# ─── BATCH SCREENING MODE ────────────────────────────────────────────────────
+elif mode == "Batch Screening":
+    st.markdown("# Batch Resume Screening")
+    st.markdown("Upload multiple resumes at once. Results shown in a ranked table and exportable as CSV.")
+    st.markdown("")
 
-    st.title("Resume Category Prediction App")
-    st.markdown("Upload a resume in PDF, TXT, or DOCX format and get the predicted job category.")
+    files = st.file_uploader(
+        "Upload resumes (multiple allowed)",
+        type=["pdf","docx","txt"],
+        accept_multiple_files=True,
+        label_visibility="collapsed",
+    )
 
-    # File upload section
-    uploaded_file = st.file_uploader("Upload a Resume", type=["pdf", "docx", "txt"])
+    filter_cat = st.selectbox("Filter by category (optional)", ["All"] + sorted(le.classes_))
 
-    if uploaded_file is not None:
-        # Extract text from the uploaded file
-        try:
-            resume_text = handle_file_upload(uploaded_file)
-            st.write("Successfully extracted the text from the uploaded resume.")
+    if files:
+        results = []
+        prog = st.progress(0, text="Processing resumes...")
 
-            # Display extracted text (optional)
-            if st.checkbox("Show extracted text", False):
-                st.text_area("Extracted Resume Text", resume_text, height=300)
+        for i, f in enumerate(files):
+            try:
+                text    = extract_text(f)
+                cat     = predict_category(text)
+                confs   = get_confidence_scores(text)
+                top_c   = confs[0][1]
+                sc      = compute_resume_score(text, cat)
+                results.append({
+                    "filename":     f.name,
+                    "category":     cat,
+                    "top_confidence": top_c,
+                    "score":        sc["total"],
+                    "word_count":   sc["word_count"],
+                    "matched_kws":  sc["matched_keywords"],
+                    "missing_kws":  sc["missing_keywords"],
+                    "timestamp":    datetime.now().strftime("%Y-%m-%d %H:%M"),
+                })
+            except Exception as e:
+                results.append({
+                    "filename": f.name, "category": "Error", "top_confidence": 0,
+                    "score": 0, "word_count": 0, "matched_kws": [], "missing_kws": [],
+                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                })
+            prog.progress((i+1)/len(files), text=f"Processing {i+1}/{len(files)}...")
 
-            # Make prediction
-            st.subheader("Predicted Category")
-            category = pred(resume_text)
-            st.write(f"The predicted category of the uploaded resume is: **{category}**")
+        prog.empty()
 
-        except Exception as e:
-            st.error(f"Error processing the file: {str(e)}")
+        # Filter
+        shown = [r for r in results if filter_cat == "All" or r["category"] == filter_cat]
+        shown.sort(key=lambda x: -x["score"])
+
+        # Summary metrics
+        valid = [r for r in results if r["category"] != "Error"]
+        c1, c2, c3, c4 = st.columns(4)
+        with c1: st.metric("Total processed", len(results))
+        with c2: st.metric("Unique categories", len(set(r["category"] for r in valid)))
+        with c3: st.metric("Avg resume score", f"{np.mean([r['score'] for r in valid]):.0f}/100" if valid else "—")
+        with c4: st.metric("Top score", f"{max(r['score'] for r in valid)}/100" if valid else "—")
+
+        st.markdown("")
+
+        # Table
+        st.markdown("### Results (sorted by score)")
+        for r in shown:
+            color = CATEGORY_COLORS.get(r["category"], "#60a5fa")
+            score_color = "#4ade80" if r["score"] >= 70 else "#fbbf24" if r["score"] >= 45 else "#f87171"
+            with st.expander(f"📄 {r['filename']}  —  {r['category']}  —  Score: {r['score']}/100"):
+                cc1, cc2, cc3 = st.columns(3)
+                with cc1: st.metric("Category", r["category"])
+                with cc2: st.metric("Confidence", f"{r['top_confidence']:.1f}%")
+                with cc3: st.metric("Score", f"{r['score']}/100")
+
+                if r["matched_kws"]:
+                    html = " ".join(f'<span class="kw-chip kw-chip-match">{k}</span>' for k in r["matched_kws"][:10])
+                    st.markdown("**Matched keywords:** " + html, unsafe_allow_html=True)
+                if r["missing_kws"]:
+                    html = " ".join(f'<span class="kw-chip kw-chip-missing">{k}</span>' for k in r["missing_kws"][:8])
+                    st.markdown("**Missing keywords:** " + html, unsafe_allow_html=True)
+
+        st.markdown("")
+        # Export
+        csv_bytes = generate_csv(results)
+        st.download_button(
+            label="⬇️  Export all results as CSV",
+            data=csv_bytes,
+            file_name=f"resume_screening_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+            mime="text/csv",
+        )
 
 
-if __name__ == "__main__":
-    main()
+# ─── SKILLS GAP ANALYSIS MODE ───────────────────────────────────────────────
+elif mode == "Skills Gap Analysis":
+    st.markdown("# Skills Gap Analysis")
+    st.markdown("Compare a resume against a job description to see which skills are missing.")
+    st.markdown("")
+
+    c1, c2 = st.columns(2)
+    with c1:
+        resume_file = st.file_uploader("Upload resume", type=["pdf","docx","txt"])
+    with c2:
+        jd_text = st.text_area("Paste job description here", height=180, placeholder="Paste the full job description...")
+
+    if resume_file and jd_text.strip():
+        with st.spinner("Running gap analysis..."):
+            try:
+                resume_text = extract_text(resume_file)
+            except Exception as e:
+                st.error(str(e)); st.stop()
+
+            category    = predict_category(resume_text)
+            gap         = skills_gap_analysis(resume_text, jd_text, category)
+            score_data  = compute_resume_score(resume_text, category)
+            confs       = get_confidence_scores(resume_text)
+
+        match_color = "#4ade80" if gap["match_pct"] >= 70 else "#fbbf24" if gap["match_pct"] >= 40 else "#f87171"
+
+        c1, c2, c3 = st.columns(3)
+        with c1: st.metric("Detected category", category)
+        with c2: st.metric("JD match", f"{gap['match_pct']}%")
+        with c3: st.metric("Resume score", f"{score_data['total']}/100")
+
+        st.markdown("")
+        st.markdown(f"""
+        <div class="conf-bar-wrap" style="margin-bottom:1.5rem">
+          <div class="conf-bar-label">
+            <span style="font-size:1rem;font-weight:500">Overall JD keyword match</span>
+            <span style="font-size:1.1rem;font-weight:600;color:{match_color}">{gap['match_pct']}%</span>
+          </div>
+          <div class="conf-bar-bg" style="height:14px;border-radius:8px">
+            <div class="conf-bar-fill" style="width:{gap['match_pct']}%;background:linear-gradient(90deg,{match_color}88,{match_color});border-radius:8px"></div>
+          </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown(f"### ✅ Skills you have ({len(gap['present'])})")
+            if gap["present"]:
+                html = " ".join(f'<span class="kw-chip kw-chip-match">{k}</span>' for k in gap["present"])
+                st.markdown(html, unsafe_allow_html=True)
+            else:
+                st.markdown('<span style="color:#64748b">No matching JD keywords found</span>', unsafe_allow_html=True)
+
+        with col2:
+            st.markdown(f"### ❌ Skills to add ({len(gap['missing'])})")
+            if gap["missing"]:
+                html = " ".join(f'<span class="kw-chip kw-chip-missing">{k}</span>' for k in gap["missing"])
+                st.markdown(html, unsafe_allow_html=True)
+
+                st.markdown("")
+                st.warning(f"💡 Adding **{len(gap['missing'])}** missing skills could increase your JD match to **100%**. Consider adding them to your skills section.")
+            else:
+                st.success("🎉 Your resume covers all detected JD keywords!")
+
+        st.markdown("")
+        st.markdown("### Resume quality for this role")
+        for label, pts in score_data["breakdown"].items():
+            maxpts = {"Keyword match": 40, "Content length": 20, "Sections present": 20,
+                      "Action verbs": 10, "Quantified results": 10}[label]
+            pct = pts / maxpts * 100
+            c = "#4ade80" if pct >= 70 else "#fbbf24" if pct >= 40 else "#f87171"
+            st.markdown(f"""
+            <div class="conf-bar-wrap">
+              <div class="conf-bar-label"><span>{label}</span><span>{pts}/{maxpts} pts</span></div>
+              <div class="conf-bar-bg" style="height:10px">
+                <div class="conf-bar-fill" style="width:{pct:.0f}%;background:linear-gradient(90deg,{c}88,{c})"></div>
+              </div>
+            </div>
+            """, unsafe_allow_html=True)
+    elif resume_file and not jd_text.strip():
+        st.info("👆 Now paste a job description on the right to run the gap analysis.")
+    elif not resume_file and jd_text.strip():
+        st.info("👆 Now upload a resume on the left to run the gap analysis.")

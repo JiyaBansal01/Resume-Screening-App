@@ -27,17 +27,14 @@ html, body, [class*="css"] { font-family: 'DM Sans', sans-serif; }
 
 .stApp { background: #0f1117; }
 
-/* Sidebar */
 [data-testid="stSidebar"] {
     background: #161b27 !important;
     border-right: 1px solid #2a2f3e;
 }
 [data-testid="stSidebar"] * { color: #c8d0e0 !important; }
 
-/* Main area */
 .main .block-container { padding: 2rem 2.5rem; }
 
-/* Cards */
 .iq-card {
     background: #161b27;
     border: 1px solid #2a2f3e;
@@ -53,7 +50,6 @@ html, body, [class*="css"] { font-family: 'DM Sans', sans-serif; }
     margin-bottom: 1.2rem;
 }
 
-/* Category badge */
 .cat-badge {
     display: inline-block;
     background: #1e3a5f;
@@ -73,7 +69,6 @@ html, body, [class*="css"] { font-family: 'DM Sans', sans-serif; }
     border-color: #16a34a55;
 }
 
-/* Confidence bar */
 .conf-bar-wrap { margin: 0.5rem 0; }
 .conf-bar-label {
     display: flex;
@@ -95,18 +90,6 @@ html, body, [class*="css"] { font-family: 'DM Sans', sans-serif; }
     transition: width 0.6s ease;
 }
 
-/* Score ring */
-.score-ring {
-    text-align: center;
-    padding: 1rem;
-}
-.score-number {
-    font-size: 3rem;
-    font-weight: 600;
-    font-family: 'DM Mono', monospace;
-}
-
-/* Keyword chips */
 .kw-chip {
     display: inline-block;
     background: #1a2035;
@@ -128,11 +111,9 @@ html, body, [class*="css"] { font-family: 'DM Sans', sans-serif; }
     color: #4ade80;
 }
 
-/* Headers */
 h1 { color: #f1f5f9 !important; font-weight: 600 !important; }
 h2, h3 { color: #e2e8f0 !important; font-weight: 500 !important; }
 
-/* Metrics */
 [data-testid="stMetric"] {
     background: #161b27;
     border: 1px solid #2a2f3e;
@@ -142,12 +123,10 @@ h2, h3 { color: #e2e8f0 !important; font-weight: 500 !important; }
 [data-testid="stMetricValue"] { color: #60a5fa !important; }
 [data-testid="stMetricLabel"] { color: #94a3b8 !important; }
 
-/* Tabs */
 [data-baseweb="tab-list"] { background: #161b27; border-radius: 10px; }
 [data-baseweb="tab"] { color: #94a3b8 !important; }
 [aria-selected="true"] { color: #60a5fa !important; }
 
-/* Buttons */
 .stButton button {
     background: #2563eb;
     color: white;
@@ -157,17 +136,13 @@ h2, h3 { color: #e2e8f0 !important; font-weight: 500 !important; }
 }
 .stButton button:hover { background: #1d4ed8; }
 
-/* File uploader */
 [data-testid="stFileUploader"] {
     background: #161b27;
     border: 2px dashed #2a3a5a;
     border-radius: 12px;
 }
 
-/* Text area */
 textarea { background: #1e2433 !important; color: #e2e8f0 !important; border-color: #2a2f3e !important; }
-
-/* Divider */
 hr { border-color: #2a2f3e; }
 </style>
 """, unsafe_allow_html=True)
@@ -176,14 +151,14 @@ hr { border-color: #2a2f3e; }
 # ─── Load models ─────────────────────────────────────────────────────────────
 @st.cache_resource
 def load_models():
-    clf    = pickle.load(open('clf.pkl', 'rb'))
-    tfidf  = pickle.load(open('tfidf.pkl', 'rb'))
-    le     = pickle.load(open('encoder.pkl', 'rb'))
+    clf   = pickle.load(open('clf.pkl', 'rb'))
+    tfidf = pickle.load(open('tfidf.pkl', 'rb'))
+    le    = pickle.load(open('encoder.pkl', 'rb'))
     return clf, tfidf, le
 
 clf, tfidf, le = load_models()
 
-# ─── Category keyword map ─────────────────────────────────────────────────────
+# ─── Category keyword map ────────────────────────────────────────────────────
 CATEGORY_KEYWORDS = {
     "Data Science":             ["python","machine learning","deep learning","tensorflow","pandas","numpy","sql","statistics","sklearn","nlp","data analysis","jupyter","matplotlib","seaborn","pytorch"],
     "Java Developer":           ["java","spring","maven","hibernate","microservices","junit","rest api","sql","oop","git","docker","kafka","jenkins"],
@@ -251,12 +226,10 @@ def extract_text(file) -> str:
     raise ValueError(f"Unsupported file type: .{ext}")
 
 
-def get_confidence_scores(text: str) -> list[tuple[str, float]]:
-    """Return sorted (category, confidence%) list using decision function."""
+def get_confidence_scores(text: str) -> list:
     cleaned   = clean_resume(text)
     vec       = tfidf.transform([cleaned]).toarray()
-    scores_raw = clf.decision_function(vec)[0]          # raw SVM margins
-    # Softmax-like normalization so they sum to 100
+    scores_raw = clf.decision_function(vec)[0]
     exp_s     = np.exp(scores_raw - scores_raw.max())
     probs     = exp_s / exp_s.sum() * 100
     pairs     = sorted(zip(le.classes_, probs), key=lambda x: -x[1])
@@ -271,16 +244,14 @@ def predict_category(text: str) -> str:
 
 
 def compute_resume_score(text: str, category: str) -> dict:
-    """Compute a 0-100 resume quality score and keyword analysis."""
     lower = text.lower()
     words = lower.split()
     kws   = CATEGORY_KEYWORDS.get(category, [])
 
     matched  = [k for k in kws if k in lower]
     missing  = [k for k in kws if k not in lower]
-    kw_score = (len(matched) / len(kws) * 40) if kws else 0  # 40 pts
+    kw_score = (len(matched) / len(kws) * 40) if kws else 0
 
-    # Length score (ideal: 300-800 words) — 20 pts
     wc = len(words)
     if   wc < 100:   len_score = 5
     elif wc < 300:   len_score = 12
@@ -288,7 +259,6 @@ def compute_resume_score(text: str, category: str) -> dict:
     elif wc <= 1200: len_score = 15
     else:            len_score = 8
 
-    # Sections detected — 20 pts (4 pts each)
     sections = {
         "Education":    any(s in lower for s in ["education","degree","university","college","bachelor","master","phd"]),
         "Experience":   any(s in lower for s in ["experience","worked","employed","job","company","role","position"]),
@@ -298,13 +268,10 @@ def compute_resume_score(text: str, category: str) -> dict:
     }
     section_score = sum(sections.values()) * 4
 
-    # Action verbs — 10 pts
     verbs = ["managed","developed","led","designed","implemented","built","created","improved","increased",
              "reduced","analyzed","collaborated","delivered","launched","optimized"]
-    verb_hits  = sum(1 for v in verbs if v in lower)
-    verb_score = min(verb_hits * 2, 10)
+    verb_score = min(sum(1 for v in verbs if v in lower) * 2, 10)
 
-    # Quantified achievements — 10 pts
     numbers = re.findall(r'\b\d+[%+]?\b', text)
     quant_score = min(len(numbers) * 2, 10)
 
@@ -331,44 +298,38 @@ def skills_gap_analysis(resume_text: str, job_description: str, category: str) -
     res_lower = resume_text.lower()
     kws       = CATEGORY_KEYWORDS.get(category, [])
 
-    # JD keywords: extract any from our known list + simple word extraction
-    jd_required = [k for k in kws if k in jd_lower]
-    # Also extract 2-3 word phrases from JD
-    jd_words = set(re.findall(r'\b[a-z]{4,}\b', jd_lower))
-    extra_jd = [w for w in jd_words if w in res_lower == False and len(w) > 4][:10]
-
-    present_in_resume = [k for k in jd_required if k in res_lower]
+    jd_required         = [k for k in kws if k in jd_lower]
+    present_in_resume   = [k for k in jd_required if k in res_lower]
     missing_from_resume = [k for k in jd_required if k not in res_lower]
     match_pct = int(len(present_in_resume) / len(jd_required) * 100) if jd_required else 0
 
     return {
-        "match_pct":         match_pct,
-        "jd_keywords":       jd_required,
-        "present":           present_in_resume,
-        "missing":           missing_from_resume,
+        "match_pct": match_pct,
+        "jd_keywords": jd_required,
+        "present":     present_in_resume,
+        "missing":     missing_from_resume,
     }
 
 
-def generate_csv(results: list[dict]) -> bytes:
+def generate_csv(results: list) -> bytes:
     rows = []
     for r in results:
         rows.append({
-            "File":          r["filename"],
-            "Category":      r["category"],
+            "File":           r["filename"],
+            "Category":       r["category"],
             "Confidence (%)": f"{r['top_confidence']:.1f}",
-            "Resume Score":  r["score"],
-            "Word Count":    r["word_count"],
+            "Resume Score":   r["score"],
+            "Word Count":     r["word_count"],
             "Matched Keywords": ", ".join(r["matched_kws"]),
             "Missing Keywords": ", ".join(r["missing_kws"]),
-            "Timestamp":     r["timestamp"],
+            "Timestamp":      r["timestamp"],
         })
     return pd.DataFrame(rows).to_csv(index=False).encode()
 
 
-# ─── Sidebar ─────────────────────────────────────────────────────────────────
-# ─── Gemini API helper ───────────────────────────────────────────────────────
+# ─── Gemini AI helper ────────────────────────────────────────────────────────
 def call_gemini(api_key: str, prompt: str) -> str:
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
+    url  = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
     body = json.dumps({"contents": [{"parts": [{"text": prompt}]}]}).encode()
     req  = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"})
     try:
@@ -472,16 +433,11 @@ if mode == "Single Resume":
             top_conf    = conf_scores[0][1]
             score_data  = compute_resume_score(text, category)
 
-        # ── Top row ──────────────────────────────────────────────────────────
         col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.metric("Predicted Category", category)
-        with col2:
-            st.metric("Confidence", f"{top_conf:.1f}%")
-        with col3:
-            st.metric("Resume Score", f"{score_data['total']}/100")
-        with col4:
-            st.metric("Word Count", score_data["word_count"])
+        with col1: st.metric("Predicted Category", category)
+        with col2: st.metric("Confidence", f"{top_conf:.1f}%")
+        with col3: st.metric("Resume Score", f"{score_data['total']}/100")
+        with col4: st.metric("Word Count", score_data["word_count"])
 
         st.markdown("")
         tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["🎯 Prediction", "📊 Quality Score", "🔑 Keywords", "💡 AI Suggestions", "✉️ Cover Letter", "📝 Raw Text"])
@@ -662,20 +618,20 @@ elif mode == "Batch Screening":
 
         for i, f in enumerate(files):
             try:
-                text    = extract_text(f)
-                cat     = predict_category(text)
-                confs   = get_confidence_scores(text)
-                top_c   = confs[0][1]
-                sc      = compute_resume_score(text, cat)
+                text  = extract_text(f)
+                cat   = predict_category(text)
+                confs = get_confidence_scores(text)
+                top_c = confs[0][1]
+                sc    = compute_resume_score(text, cat)
                 results.append({
-                    "filename":     f.name,
-                    "category":     cat,
+                    "filename":       f.name,
+                    "category":       cat,
                     "top_confidence": top_c,
-                    "score":        sc["total"],
-                    "word_count":   sc["word_count"],
-                    "matched_kws":  sc["matched_keywords"],
-                    "missing_kws":  sc["missing_keywords"],
-                    "timestamp":    datetime.now().strftime("%Y-%m-%d %H:%M"),
+                    "score":          sc["total"],
+                    "word_count":     sc["word_count"],
+                    "matched_kws":    sc["matched_keywords"],
+                    "missing_kws":    sc["missing_keywords"],
+                    "timestamp":      datetime.now().strftime("%Y-%m-%d %H:%M"),
                 })
             except Exception as e:
                 results.append({
@@ -687,11 +643,9 @@ elif mode == "Batch Screening":
 
         prog.empty()
 
-        # Filter
         shown = [r for r in results if filter_cat == "All" or r["category"] == filter_cat]
         shown.sort(key=lambda x: -x["score"])
 
-        # Summary metrics
         valid = [r for r in results if r["category"] != "Error"]
         c1, c2, c3, c4 = st.columns(4)
         with c1: st.metric("Total processed", len(results))
@@ -700,12 +654,8 @@ elif mode == "Batch Screening":
         with c4: st.metric("Top score", f"{max(r['score'] for r in valid)}/100" if valid else "—")
 
         st.markdown("")
-
-        # Table
         st.markdown("### Results (sorted by score)")
         for r in shown:
-            color = CATEGORY_COLORS.get(r["category"], "#60a5fa")
-            score_color = "#4ade80" if r["score"] >= 70 else "#fbbf24" if r["score"] >= 45 else "#f87171"
             with st.expander(f"📄 {r['filename']}  —  {r['category']}  —  Score: {r['score']}/100"):
                 cc1, cc2, cc3 = st.columns(3)
                 with cc1: st.metric("Category", r["category"])
@@ -720,7 +670,6 @@ elif mode == "Batch Screening":
                     st.markdown("**Missing keywords:** " + html, unsafe_allow_html=True)
 
         st.markdown("")
-        # Export
         csv_bytes = generate_csv(results)
         st.download_button(
             label="⬇️  Export all results as CSV",
@@ -749,10 +698,9 @@ elif mode == "Skills Gap Analysis":
             except Exception as e:
                 st.error(str(e)); st.stop()
 
-            category    = predict_category(resume_text)
-            gap         = skills_gap_analysis(resume_text, jd_text, category)
-            score_data  = compute_resume_score(resume_text, category)
-            confs       = get_confidence_scores(resume_text)
+            category   = predict_category(resume_text)
+            gap        = skills_gap_analysis(resume_text, jd_text, category)
+            score_data = compute_resume_score(resume_text, category)
 
         match_color = "#4ade80" if gap["match_pct"] >= 70 else "#fbbf24" if gap["match_pct"] >= 40 else "#f87171"
 
@@ -788,7 +736,6 @@ elif mode == "Skills Gap Analysis":
             if gap["missing"]:
                 html = " ".join(f'<span class="kw-chip kw-chip-missing">{k}</span>' for k in gap["missing"])
                 st.markdown(html, unsafe_allow_html=True)
-
                 st.markdown("")
                 st.warning(f"💡 Adding **{len(gap['missing'])}** missing skills could increase your JD match to **100%**. Consider adding them to your skills section.")
             else:
@@ -809,6 +756,7 @@ elif mode == "Skills Gap Analysis":
               </div>
             </div>
             """, unsafe_allow_html=True)
+
     elif resume_file and not jd_text.strip():
         st.info("👆 Now paste a job description on the right to run the gap analysis.")
     elif not resume_file and jd_text.strip():

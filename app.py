@@ -1,3 +1,9 @@
+
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
+api_key = os.getenv("GEMINI_API_KEY")
 import streamlit as st
 import pickle
 import docx
@@ -390,16 +396,11 @@ with st.sidebar:
     st.divider()
 
     st.markdown("**🤖 Gemini AI Features**")
-    gemini_key = st.text_input(
-        "Gemini API Key",
-        type="password",
-        placeholder="Paste your API key here...",
-        help="Get free key at aistudio.google.com/apikey"
-    )
+    gemini_key = os.getenv("GEMINI_API_KEY")
     if gemini_key:
-        st.success("✅ AI features unlocked!")
+        st.success("✅ AI features enabled!")
     else:
-        st.caption("🔑 Add key to enable AI suggestions & cover letter")
+        st.warning("⚠️ Gemini API key not configured")
     st.divider()
 
     st.markdown("**Model info**")

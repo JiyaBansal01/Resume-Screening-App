@@ -333,12 +333,38 @@ def generate_csv(results: list) -> bytes:
     return pd.DataFrame(rows).to_csv(index=False).encode()
 
 
-# ─── Gemini AI helper ────────────────────────────────────────────────────────
-def call_gemini(api_key: str, prompt: str, max_retries: int = 4) -> str:
+# ─── AI helper (Groq first, Gemini fallback) ─────────────────────────────────
+def call_groq(prompt: str, max_retries: int = 3) -> str:
+    groq_key = os.getenv("GROQ_API_KEY")
+    if not groq_key:
+        raise Exception("No Groq key")
+    url  = "https://api.groq.com/openai/v1/chat/completions"
+    body = json.dumps({
+        "model": "llama-3.3-70b-versatile",
+        "messages": [{"role": "user", "content": prompt}],
+        "max_tokens": 1024,
+    }).encode()
+    req = urllib.request.Request(url, data=body, headers={
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {groq_key}",
+    })
+    for attempt in range(max_retries):
+        try:
+            with urllib.request.urlopen(req, timeout=30) as r:
+                data = json.loads(r.read())
+                return data["choices"][0]["message"]["content"]
+        except Exception as e:
+            if "429" in str(e):
+                time.sleep(5 * (2 ** attempt))
+            else:
+                raise e
+    raise Exception("Groq rate limit exceeded")
+
+
+def call_gemini(api_key: str, prompt: str, max_retries: int = 3) -> str:
     url  = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
     body = json.dumps({"contents": [{"parts": [{"text": prompt}]}]}).encode()
     req  = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"})
-
     for attempt in range(max_retries):
         try:
             with urllib.request.urlopen(req, timeout=30) as r:
@@ -346,12 +372,22 @@ def call_gemini(api_key: str, prompt: str, max_retries: int = 4) -> str:
                 return data["candidates"][0]["content"]["parts"][0]["text"]
         except Exception as e:
             if "429" in str(e):
-                wait_time = 2 ** attempt  # 1s, 2s, 4s, 8s
-                time.sleep(wait_time)
+                time.sleep(5 * (2 ** attempt))
             else:
                 return f"❌ API Error: {e}"
+    return None
 
-    return "❌ API Error: Too many requests. Please wait a moment and try again."
+
+def call_ai(gemini_key: str, prompt: str) -> str:
+    try:
+        return call_groq(prompt)
+    except Exception:
+        pass
+    if gemini_key:
+        result = call_gemini(gemini_key, prompt)
+        if result:
+            return result
+    return "❌ API Error: Both Groq and Gemini rate limits exceeded. Please wait a minute and try again."
 
 
 def get_improvement_suggestions(api_key: str, resume_text: str, category: str, score_data: dict) -> str:
@@ -369,7 +405,7 @@ Missing sections: {[k for k,v in score_data['sections_detected'].items() if not 
 Give exactly 6 specific, actionable improvement suggestions numbered 1-6.
 Each suggestion should be 1-2 sentences. Be direct and practical.
 Format: just the numbered list, no intro text."""
-    return call_gemini(api_key, prompt)
+    return call_ai(api_key, prompt)
 
 
 def generate_cover_letter(api_key: str, resume_text: str, category: str, company: str, role: str) -> str:
@@ -387,7 +423,7 @@ Write a compelling 3-paragraph cover letter:
 - Paragraph 3: Enthusiasm for company, call to action
 
 Keep it under 300 words. Professional tone. Do not use placeholders like [Your Name]."""
-    return call_gemini(api_key, prompt)
+    return call_ai(api_key, prompt)
 
 
 # ─── Sidebar ─────────────────────────────────────────────────────────────────
@@ -403,12 +439,15 @@ with st.sidebar:
     )
     st.divider()
 
-    st.markdown("**🤖 Gemini AI Features**")
+    st.markdown("**🤖 AI Features**")
     gemini_key = os.getenv("GEMINI_API_KEY")
+    groq_key   = os.getenv("GROQ_API_KEY")
+    if groq_key:
+        st.success("✅ Groq AI active (primary)")
     if gemini_key:
-        st.success("✅ AI features enabled!")
-    else:
-        st.warning("⚠️ Gemini API key not configured")
+        st.success("✅ Gemini AI active (fallback)")
+    if not groq_key and not gemini_key:
+        st.warning("⚠️ No AI API key configured")
     st.divider()
 
     st.markdown("**Model info**")

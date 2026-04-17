@@ -1,6 +1,6 @@
-
 from dotenv import load_dotenv
 import os
+import time
 
 load_dotenv()
 api_key = os.getenv("GEMINI_API_KEY")
@@ -334,16 +334,24 @@ def generate_csv(results: list) -> bytes:
 
 
 # ─── Gemini AI helper ────────────────────────────────────────────────────────
-def call_gemini(api_key: str, prompt: str) -> str:
+def call_gemini(api_key: str, prompt: str, max_retries: int = 4) -> str:
     url  = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
     body = json.dumps({"contents": [{"parts": [{"text": prompt}]}]}).encode()
     req  = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"})
-    try:
-        with urllib.request.urlopen(req, timeout=30) as r:
-            data = json.loads(r.read())
-            return data["candidates"][0]["content"]["parts"][0]["text"]
-    except Exception as e:
-        return f"❌ API Error: {e}"
+
+    for attempt in range(max_retries):
+        try:
+            with urllib.request.urlopen(req, timeout=30) as r:
+                data = json.loads(r.read())
+                return data["candidates"][0]["content"]["parts"][0]["text"]
+        except Exception as e:
+            if "429" in str(e):
+                wait_time = 2 ** attempt  # 1s, 2s, 4s, 8s
+                time.sleep(wait_time)
+            else:
+                return f"❌ API Error: {e}"
+
+    return "❌ API Error: Too many requests. Please wait a moment and try again."
 
 
 def get_improvement_suggestions(api_key: str, resume_text: str, category: str, score_data: dict) -> str:

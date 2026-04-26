@@ -332,7 +332,7 @@ def generate_csv(results: list) -> bytes:
 # ─── Sidebar ─────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("## 📄 ResumeIQ")
-    st.markdown("*AI-Powered Resume Screener*")
+    st.markdown("*Smart Resume Analyzerc*")
     st.divider()
 
     mode = st.radio(

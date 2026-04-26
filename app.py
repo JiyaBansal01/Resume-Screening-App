@@ -1,9 +1,7 @@
 from dotenv import load_dotenv
 import os
-import time
 
 load_dotenv()
-api_key = os.getenv("GEMINI_API_KEY")
 import streamlit as st
 import pickle
 import docx
@@ -12,8 +10,6 @@ import re
 import numpy as np
 import pandas as pd
 import io
-import json
-import urllib.request
 from datetime import datetime
 
 # ─── Page config ────────────────────────────────────────────────────────────
@@ -333,99 +329,6 @@ def generate_csv(results: list) -> bytes:
     return pd.DataFrame(rows).to_csv(index=False).encode()
 
 
-# ─── AI helper (Groq first, Gemini fallback) ─────────────────────────────────
-def call_groq(prompt: str, max_retries: int = 3) -> str:
-    groq_key = os.getenv("GROQ_API_KEY")
-    if not groq_key:
-        raise Exception("No Groq key")
-    url  = "https://api.groq.com/openai/v1/chat/completions"
-    body = json.dumps({
-        "model": "llama-3.3-70b-versatile",
-        "messages": [{"role": "user", "content": prompt}],
-        "max_tokens": 1024,
-    }).encode()
-    req = urllib.request.Request(url, data=body, headers={
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {groq_key}",
-    })
-    for attempt in range(max_retries):
-        try:
-            with urllib.request.urlopen(req, timeout=30) as r:
-                data = json.loads(r.read())
-                return data["choices"][0]["message"]["content"]
-        except Exception as e:
-            if "429" in str(e):
-                time.sleep(5 * (2 ** attempt))
-            else:
-                raise e
-    raise Exception("Groq rate limit exceeded")
-
-
-def call_gemini(api_key: str, prompt: str, max_retries: int = 3) -> str:
-    url  = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
-    body = json.dumps({"contents": [{"parts": [{"text": prompt}]}]}).encode()
-    req  = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"})
-    for attempt in range(max_retries):
-        try:
-            with urllib.request.urlopen(req, timeout=30) as r:
-                data = json.loads(r.read())
-                return data["candidates"][0]["content"]["parts"][0]["text"]
-        except Exception as e:
-            if "429" in str(e):
-                time.sleep(5 * (2 ** attempt))
-            else:
-                return f"❌ API Error: {e}"
-    return None
-
-
-def call_ai(gemini_key: str, prompt: str) -> str:
-    try:
-        return call_groq(prompt)
-    except Exception:
-        pass
-    if gemini_key:
-        result = call_gemini(gemini_key, prompt)
-        if result:
-            return result
-    return "❌ API Error: Both Groq and Gemini rate limits exceeded. Please wait a minute and try again."
-
-
-def get_improvement_suggestions(api_key: str, resume_text: str, category: str, score_data: dict) -> str:
-    missing = ", ".join(score_data["missing_keywords"][:10]) or "none"
-    prompt = f"""You are an expert resume coach. Analyze this resume for a {category} role.
-
-Resume text (first 1500 chars):
-{resume_text[:1500]}
-
-Current score: {score_data['total']}/100
-Missing keywords: {missing}
-Sections detected: {[k for k,v in score_data['sections_detected'].items() if v]}
-Missing sections: {[k for k,v in score_data['sections_detected'].items() if not v]}
-
-Give exactly 6 specific, actionable improvement suggestions numbered 1-6.
-Each suggestion should be 1-2 sentences. Be direct and practical.
-Format: just the numbered list, no intro text."""
-    return call_ai(api_key, prompt)
-
-
-def generate_cover_letter(api_key: str, resume_text: str, category: str, company: str, role: str) -> str:
-    prompt = f"""Write a professional cover letter based on this resume for a {category} position.
-
-Company: {company if company else "the company"}
-Role: {role if role else category}
-
-Resume (first 1500 chars):
-{resume_text[:1500]}
-
-Write a compelling 3-paragraph cover letter:
-- Paragraph 1: Strong opening, mention role and key strength
-- Paragraph 2: 2-3 specific achievements/skills from the resume
-- Paragraph 3: Enthusiasm for company, call to action
-
-Keep it under 300 words. Professional tone. Do not use placeholders like [Your Name]."""
-    return call_ai(api_key, prompt)
-
-
 # ─── Sidebar ─────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("## 📄 ResumeIQ")
@@ -439,16 +342,7 @@ with st.sidebar:
     )
     st.divider()
 
-    st.markdown("**🤖 AI Features**")
-    gemini_key = os.getenv("GEMINI_API_KEY")
-    groq_key   = os.getenv("GROQ_API_KEY")
-    if groq_key:
-        st.success("✅ Groq AI active (primary)")
-    if gemini_key:
-        st.success("✅ Gemini AI active (fallback)")
-    if not groq_key and not gemini_key:
-        st.warning("⚠️ No AI API key configured")
-    st.divider()
+
 
     st.markdown("**Model info**")
     st.markdown(f"- `OneVsRest + SVC`")
@@ -488,7 +382,7 @@ if mode == "Single Resume":
         with col4: st.metric("Word Count", score_data["word_count"])
 
         st.markdown("")
-        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["🎯 Prediction", "📊 Quality Score", "🔑 Keywords", "💡 AI Suggestions", "✉️ Cover Letter", "📝 Raw Text"])
+        tab1, tab2, tab3, tab4 = st.tabs(["🎯 Prediction", "📊 Quality Score", "🔑 Keywords", "📝 Raw Text"])
 
         # ── Tab 1: Prediction ────────────────────────────────────────────────
         with tab1:
@@ -578,70 +472,8 @@ if mode == "Single Resume":
                 st.markdown("")
                 st.info(f"💡 Add these {len(score_data['missing_keywords'])} missing keywords to improve your score by up to **{len(score_data['missing_keywords']) * 3}** points.")
 
-        # ── Tab 4: AI Suggestions ────────────────────────────────────────────
+        # ── Tab 4: Raw Text ──────────────────────────────────────────────────
         with tab4:
-            if not gemini_key:
-                st.markdown("""
-                <div class="iq-card" style="text-align:center;padding:2.5rem">
-                  <div style="font-size:2rem;margin-bottom:.5rem">🤖</div>
-                  <div style="color:#94a3b8;font-size:1rem">Add your Gemini API key in the sidebar to unlock AI-powered resume improvement suggestions.</div>
-                  <div style="margin-top:1rem;font-size:.85rem;color:#64748b">Free key at → aistudio.google.com/apikey</div>
-                </div>
-                """, unsafe_allow_html=True)
-            else:
-                if st.button("✨ Generate AI Improvement Suggestions", use_container_width=True):
-                    with st.spinner("AI is analyzing your resume..."):
-                        suggestions = get_improvement_suggestions(gemini_key, text, category, score_data)
-                    st.session_state["suggestions"] = suggestions
-
-                if "suggestions" in st.session_state:
-                    st.markdown("""<div class="iq-card">""", unsafe_allow_html=True)
-                    st.markdown("### 💡 Personalized Improvement Tips")
-                    st.markdown(st.session_state["suggestions"])
-                    st.markdown("</div>", unsafe_allow_html=True)
-                    st.download_button(
-                        "⬇️ Download suggestions as TXT",
-                        data=st.session_state["suggestions"],
-                        file_name="resume_suggestions.txt",
-                        mime="text/plain"
-                    )
-
-        # ── Tab 5: Cover Letter ──────────────────────────────────────────────
-        with tab5:
-            if not gemini_key:
-                st.markdown("""
-                <div class="iq-card" style="text-align:center;padding:2.5rem">
-                  <div style="font-size:2rem;margin-bottom:.5rem">✉️</div>
-                  <div style="color:#94a3b8;font-size:1rem">Add your Gemini API key in the sidebar to generate a personalized cover letter.</div>
-                  <div style="margin-top:1rem;font-size:.85rem;color:#64748b">Free key at → aistudio.google.com/apikey</div>
-                </div>
-                """, unsafe_allow_html=True)
-            else:
-                c1, c2 = st.columns(2)
-                with c1:
-                    company_name = st.text_input("Company name (optional)", placeholder="e.g. Google, TCS, Infosys")
-                with c2:
-                    role_name = st.text_input("Job role (optional)", placeholder=f"e.g. {category}")
-
-                if st.button("✨ Generate Cover Letter", use_container_width=True):
-                    with st.spinner("AI is writing your cover letter..."):
-                        cover = generate_cover_letter(gemini_key, text, category, company_name, role_name)
-                    st.session_state["cover_letter"] = cover
-
-                if "cover_letter" in st.session_state:
-                    st.markdown("""<div class="iq-card">""", unsafe_allow_html=True)
-                    st.markdown("### ✉️ Your Cover Letter")
-                    st.text_area("", st.session_state["cover_letter"], height=350, label_visibility="collapsed")
-                    st.markdown("</div>", unsafe_allow_html=True)
-                    st.download_button(
-                        "⬇️ Download cover letter as TXT",
-                        data=st.session_state["cover_letter"],
-                        file_name="cover_letter.txt",
-                        mime="text/plain"
-                    )
-
-        # ── Tab 6: Raw Text ──────────────────────────────────────────────────
-        with tab6:
             st.text_area("Extracted text", text, height=350, label_visibility="collapsed")
 
 
